@@ -1,0 +1,328 @@
+ import React, { useState, useEffect, useCallback } from 'react';
+ import { initializeApp } from 'firebase/app';
+ import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+ import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, query } from 'firebase/firestore';
+
+ // Define the exercise list
+ const EXERCISES = [
+     "Barbell curl", "Dumbell curl", "Hammer curl", "Preacher curl", "Cable curl", "Machine curl",
+     "Bicep pulldown", "Tricep pulldown", "Tricep pushdown", "Overhead rope extention", "Skull crushers",
+     "Forearm cable curls", "Hammer rope curl", "Lat pulldown", "Lat row", "Machine row", "Machine pulldown",
+     "Bench press", "Incline bench press", "Incline smith machine bench press", "Lat pullover", "Pec deck",
+     "Dumbell chest press", "Machine press", "Machine incline press", "Cable fly's", "Dumbell shoulder press",
+     "Machine shoulder press", "Machine laterial raises", "Dumbell laterial raises", "Rear delt face pull",
+     "Reverse pec deck", "Cable laterial raises", "Ab crunch machine", "Ab crunch machine with legs."
+ ];
+
+ // Main App Component
+ function App() {
+     // State for Firebase instances
+     const [db, setDb] = useState(null);
+     const [auth, setAuth] = useState(null);
+     const [userId, setUserId] = useState(null);
+     const [isAuthReady, setIsAuthReady] = useState(false);
+     const [loading, setLoading] = useState(true);
+     const [error, setError] = useState(null);
+
+     // State for navigation and data
+     const [selectedExercise, setSelectedExercise] = useState(null); // Stores the name of the selected exercise
+     const [exerciseData, setExerciseData] = useState({}); // Stores all exercise data fetched from Firestore
+     const [searchQuery, setSearchQuery] = useState('');
+
+     // Firebase Initialization and Authentication
+     useEffect(() => {
+         try {
+             const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+             const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+
+             if (Object.keys(firebaseConfig).length === 0) {
+                 console.error("Firebase config is missing. Please ensure __firebase_config is set.");
+                 setError("Firebase configuration error. Please try again later.");
+                 setLoading(false);
+                 return;
+             }
+
+             const app = initializeApp(firebaseConfig);
+             const firestore = getFirestore(app);
+             const firebaseAuth = getAuth(app);
+
+             setDb(firestore);
+             setAuth(firebaseAuth);
+
+             // Listen for auth state changes
+             const unsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
+                 if (user) {
+                     setUserId(user.uid);
+                     setIsAuthReady(true);
+                     console.log("User authenticated:", user.uid);
+                 } else {
+                     // Sign in anonymously if no user is found
+                     try {
+                         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+                         if (initialAuthToken) {
+                             await signInWithCustomToken(firebaseAuth, initialAuthToken);
+                         } else {
+                             await signInAnonymously(firebaseAuth);
+                         }
+                     } catch (authError) {
+                         console.error("Firebase anonymous sign-in failed:", authError);
+                         setError("Authentication failed. Please check your network connection.");
+                     }
+                 }
+                 setLoading(false);
+             });
+
+             return () => unsubscribe(); // Cleanup auth listener
+         } catch (err) {
+             console.error("Error initializing Firebase:", err);
+             setError("Failed to initialize the application.");
+             setLoading(false);
+         }
+     }, []);
+
+     // Fetch and listen to exercise data from Firestore
+     useEffect(() => {
+         if (!db || !userId || !isAuthReady) {
+             return;
+         }
+
+         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+         const exercisesCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/exercises`);
+
+         const unsubscribe = onSnapshot(exercisesCollectionRef, (snapshot) => {
+             const data = {};
+             snapshot.forEach((doc) => {
+                 // Corrected: Directly assign doc.data() to the exercise name key
+                 data[doc.id] = doc.data();
+             });
+             setExerciseData(data);
+             console.log("Fetched exercise data:", data);
+         }, (err) => {
+             console.error("Error fetching exercises:", err);
+             setError("Failed to load exercise data.");
+         });
+
+         // Initial population of exercises if they don't exist
+         const populateInitialExercises = async () => {
+             for (const exerciseName of EXERCISES) {
+                 const docRef = doc(db, `artifacts/${appId}/users/${userId}/exercises`, exerciseName);
+                 const docSnap = await getDoc(docRef);
+                 if (!docSnap.exists()) {
+                     await setDoc(docRef, {
+                         name: exerciseName,
+                         lastWeight: 0,
+                         lastReps: 0,
+                         lastSets: 0
+                     });
+                     console.log(`Initialized ${exerciseName} in Firestore.`);
+                 }
+             }
+         };
+
+         populateInitialExercises();
+
+         return () => unsubscribe(); // Cleanup snapshot listener
+     }, [db, userId, isAuthReady]);
+
+     // Filtered exercises based on search query
+     const filteredExercises = EXERCISES.filter(exercise =>
+         exercise.toLowerCase().includes(searchQuery.toLowerCase())
+     );
+
+     // Handle navigation to exercise detail
+     const handleExerciseClick = (exerciseName) => {
+         setSelectedExercise(exerciseName);
+     };
+
+     // Handle returning to the exercise list
+     const handleBackToList = () => {
+         setSelectedExercise(null);
+     };
+
+     // Render loading/error states
+     if (loading) {
+         return (
+             <div className="flex items-center justify-center min-h-screen bg-black text-orange-500">
+                 <div className="text-xl font-semibold">Loading application...</div>
+             </div>
+         );
+     }
+
+     if (error) {
+         return (
+             <div className="flex items-center justify-center min-h-screen bg-black text-red-400 p-4 text-center">
+                 <div className="text-xl font-semibold">{error}</div>
+             </div>
+         );
+     }
+
+     // Main application UI
+     return (
+         <div className="min-h-screen bg-black text-orange-500 font-inter flex flex-col items-center p-4">
+             <div className="bg-gray-900 border border-gray-700 rounded-xl shadow-lg w-full max-w-md p-6">
+                 <h1 className="text-3xl font-bold text-center mb-6 text-orange-500">Gym Tracker</h1>
+
+                 {/* Conditional rendering based on selectedExercise */}
+                 {selectedExercise ? (
+                     <ExerciseDetail
+                         exerciseName={selectedExercise}
+                         // Corrected: Directly access exerciseData with selectedExercise
+                         data={exerciseData[selectedExercise] || { name: selectedExercise, lastWeight: 0, lastReps: 0, lastSets: 0 }}
+                         db={db}
+                         userId={userId}
+                         onBack={handleBackToList}
+                     />
+                 ) : (
+                     <ExerciseList
+                         searchQuery={searchQuery}
+                         setSearchQuery={setSearchQuery}
+                         filteredExercises={filteredExercises}
+                         onExerciseClick={handleExerciseClick}
+                     />
+                 )}
+             </div>
+         </div>
+     );
+ }
+
+ // ExerciseList Component
+ function ExerciseList({ searchQuery, setSearchQuery, filteredExercises, onExerciseClick }) {
+     return (
+         <>
+             <input
+                 type="text"
+                 placeholder="Search exercises..."
+                 className="w-full p-3 mb-4 bg-gray-800 text-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 placeholder-gray-500"
+                 value={searchQuery}
+                 onChange={(e) => setSearchQuery(e.target.value)}
+             />
+             <div className="max-h-96 overflow-y-auto custom-scrollbar">
+                 {filteredExercises.length > 0 ? (
+                     <ul className="space-y-2">
+                         {filteredExercises.map((exercise) => (
+                             <li key={exercise}>
+                                 <button
+                                     onClick={() => onExerciseClick(exercise)}
+                                     className="w-full text-left p-3 bg-gray-900 border border-gray-700 hover:bg-orange-700 hover:border-orange-700 transition-colors duration-200 rounded-lg text-lg font-medium shadow-md text-orange-300"
+                                 >
+                                     {exercise}
+                                 </button>
+                             </li>
+                         ))}
+                     </ul>
+                 ) : (
+                     <p className="text-center text-gray-500 text-lg py-4">No exercises found.</p>
+                 )}
+             </div>
+         </>
+     );
+ }
+
+ // ExerciseDetail Component
+ function ExerciseDetail({ exerciseName, data, db, userId, onBack }) {
+     // Ensure data is not null/undefined before accessing properties
+     const [weight, setWeight] = useState(data?.lastWeight || 0);
+     const [reps, setReps] = useState(data?.lastReps || 0);
+     const [sets, setSets] = useState(data?.lastSets || 0);
+     const [saveMessage, setSaveMessage] = useState('');
+
+     // Update local state when data prop changes (e.g., from Firestore snapshot)
+     useEffect(() => {
+         setWeight(data?.lastWeight || 0);
+         setReps(data?.lastReps || 0);
+         setSets(data?.lastSets || 0);
+     }, [data]);
+
+     // Function to update an individual value
+     const updateValue = (setter, currentValue, increment) => {
+         setter(prev => Math.max(0, prev + increment)); // Ensure value doesn't go below 0
+     };
+
+     // Save data to Firestore
+     const handleSave = useCallback(async () => {
+         if (!db || !userId) {
+             setSaveMessage("Error: Database not ready.");
+             return;
+         }
+         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+         const docRef = doc(db, `artifacts/${appId}/users/${userId}/exercises`, exerciseName);
+         try {
+             await setDoc(docRef, {
+                 lastWeight: weight,
+                 lastReps: reps,
+                 lastSets: sets
+             }, { merge: true }); // Use merge to only update specified fields
+             setSaveMessage("Saved successfully!");
+             setTimeout(() => setSaveMessage(''), 3000); // Clear message after 3 seconds
+         } catch (e) {
+             console.error("Error saving document: ", e);
+             setSaveMessage("Error saving data.");
+         }
+     }, [db, userId, exerciseName, weight, reps, sets]);
+
+     // Input change handlers
+     const handleWeightChange = (e) => setWeight(Number(e.target.value));
+     const handleRepsChange = (e) => setReps(Number(e.target.value));
+     const handleSetsChange = (e) => setSets(Number(e.target.value));
+
+     // Helper component for input fields with buttons
+     const StatInput = ({ label, value, setter }) => (
+         <div className="flex items-center justify-between mb-4 bg-gray-900 border border-gray-700 p-4 rounded-lg shadow-inner">
+             <label className="text-lg font-medium text-orange-300 w-1/3">{label}:</label>
+             <div className="flex items-center w-2/3">
+                 <button
+                     onClick={() => updateValue(setter, value, -1)}
+                     className="p-2 bg-red-700 hover:bg-red-800 rounded-full w-10 h-10 flex items-center justify-center text-xl font-bold text-white shadow-md focus:outline-none focus:ring-2 focus:ring-red-500"
+                 >
+                     -
+                 </button>
+                 <input
+                     type="number"
+                     value={value}
+                     onChange={(e) => setter(Number(e.target.value))}
+                     className="flex-grow mx-3 p-2 text-center bg-gray-800 text-orange-300 rounded-md text-xl font-semibold focus:outline-none focus:ring-2 focus:ring-orange-500"
+                     min="0"
+                 />
+                 <button
+                     onClick={() => updateValue(setter, value, 1)}
+                     className="p-2 bg-green-700 hover:bg-green-800 rounded-full w-10 h-10 flex items-center justify-center text-xl font-bold text-white shadow-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                 >
+                     +
+                 </button>
+             </div>
+         </div>
+     );
+
+     return (
+         <>
+             <h2 className="text-2xl font-bold text-orange-500 mb-6 text-center">{exerciseName}</h2>
+
+             <StatInput label="Weight (kg)" value={weight} setter={setWeight} />
+             <StatInput label="Reps" value={reps} setter={setReps} />
+             <StatInput label="Sets" value={sets} setter={setSets} />
+
+             <button
+                 onClick={handleSave}
+                 className="w-full bg-orange-600 hover:bg-orange-700 text-black font-bold py-3 px-4 rounded-lg shadow-lg transition-colors duration-200 mb-4 focus:outline-none focus:ring-2 focus:ring-orange-500"
+             >
+                 Save Progress
+             </button>
+
+             {saveMessage && (
+                 <p className={`text-center text-sm ${saveMessage.includes('Error') ? 'text-red-400' : 'text-green-400'} mb-4`}>
+                     {saveMessage}
+                 </p>
+             )}
+
+             <button
+                 onClick={onBack}
+                 className="w-full bg-gray-800 hover:bg-gray-700 text-orange-300 font-bold py-3 px-4 rounded-lg shadow-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-gray-500"
+             >
+                 Back to Exercises
+             </button>
+         </>
+     );
+ }
+
+ export default App;
+ 
