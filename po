@@ -1,328 +1,340 @@
- import React, { useState, useEffect, useCallback } from 'react';
- import { initializeApp } from 'firebase/app';
- import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
- import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, query } from 'firebase/firestore';
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Progressive Overload Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* Custom scrollbar for better aesthetics */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #1a1a1a; /* Darker track color */
+            border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #fb923c; /* Orange thumb color */
+            border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #ea580c; /* Darker orange on hover */
+        }
 
- // Define the exercise list
- const EXERCISES = [
-     "Barbell curl", "Dumbell curl", "Hammer curl", "Preacher curl", "Cable curl", "Machine curl",
-     "Bicep pulldown", "Tricep pulldown", "Tricep pushdown", "Overhead rope extention", "Skull crushers",
-     "Forearm cable curls", "Hammer rope curl", "Lat pulldown", "Lat row", "Machine row", "Machine pulldown",
-     "Bench press", "Incline bench press", "Incline smith machine bench press", "Lat pullover", "Pec deck",
-     "Dumbell chest press", "Machine press", "Machine incline press", "Cable fly's", "Dumbell shoulder press",
-     "Machine shoulder press", "Machine laterial raises", "Dumbell laterial raises", "Rear delt face pull",
-     "Reverse pec deck", "Cable laterial raises", "Ab crunch machine", "Ab crunch machine with legs."
- ];
+        /* Set Inter font globally for consistent typography */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-black text-orange-500 min-h-screen flex items-center justify-center p-4">
+    <div id="app-container" class="bg-gray-900 border border-gray-700 rounded-xl shadow-lg w-full max-w-md p-6">
+        <h1 class="text-3xl font-bold text-center mb-6 text-orange-500">Gym Tracker</h1>
 
- // Main App Component
- function App() {
-     // State for Firebase instances
-     const [db, setDb] = useState(null);
-     const [auth, setAuth] = useState(null);
-     const [userId, setUserId] = useState(null);
-     const [isAuthReady, setIsAuthReady] = useState(false);
-     const [loading, setLoading] = useState(true);
-     const [error, setError] = useState(null);
+        <div id="loading-message" class="text-xl font-semibold text-center text-orange-400 hidden">Loading application...</div>
+        <div id="error-message" class="text-xl font-semibold text-center text-red-400 p-4 hidden"></div>
 
-     // State for navigation and data
-     const [selectedExercise, setSelectedExercise] = useState(null); // Stores the name of the selected exercise
-     const [exerciseData, setExerciseData] = useState({}); // Stores all exercise data fetched from Firestore
-     const [searchQuery, setSearchQuery] = useState('');
+        <div id="exercise-list-view">
+            <input
+                type="text"
+                id="search-input"
+                placeholder="Search exercises..."
+                class="w-full p-3 mb-4 bg-gray-800 text-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 placeholder-gray-500"
+            />
+            <div id="exercises-container" class="max-h-96 overflow-y-auto custom-scrollbar space-y-2">
+                </div>
+            <p id="no-exercises-found" class="text-center text-gray-500 text-lg py-4 hidden">No exercises found.</p>
+        </div>
 
-     // Firebase Initialization and Authentication
-     useEffect(() => {
-         try {
-             const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-             const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        <div id="exercise-detail-view" class="hidden">
+            <h2 id="detail-exercise-name" class="text-2xl font-bold text-orange-500 mb-6 text-center"></h2>
 
-             if (Object.keys(firebaseConfig).length === 0) {
-                 console.error("Firebase config is missing. Please ensure __firebase_config is set.");
-                 setError("Firebase configuration error. Please try again later.");
-                 setLoading(false);
-                 return;
-             }
+            <div class="flex items-center justify-between mb-4 bg-gray-900 border border-gray-700 p-4 rounded-lg shadow-inner">
+                <label class="text-lg font-medium text-orange-300 w-1/3">Weight (kg):</label>
+                <div class="flex items-center w-2/3">
+                    <button id="weight-decrease" class="p-2 bg-red-700 hover:bg-red-800 rounded-full w-10 h-10 flex items-center justify-center text-xl font-bold text-white shadow-md focus:outline-none focus:ring-2 focus:ring-red-500">-</button>
+                    <input type="number" id="weight-input" class="flex-grow mx-3 p-2 text-center bg-gray-800 text-orange-300 rounded-md text-xl font-semibold focus:outline-none focus:ring-2 focus:ring-orange-500" min="0">
+                    <button id="weight-increase" class="p-2 bg-green-700 hover:bg-green-800 rounded-full w-10 h-10 flex items-center justify-center text-xl font-bold text-white shadow-md focus:outline-none focus:ring-2 focus:ring-green-500">+</button>
+                </div>
+            </div>
 
-             const app = initializeApp(firebaseConfig);
-             const firestore = getFirestore(app);
-             const firebaseAuth = getAuth(app);
+            <div class="flex items-center justify-between mb-4 bg-gray-900 border border-gray-700 p-4 rounded-lg shadow-inner">
+                <label class="text-lg font-medium text-orange-300 w-1/3">Reps:</label>
+                <div class="flex items-center w-2/3">
+                    <button id="reps-decrease" class="p-2 bg-red-700 hover:bg-red-800 rounded-full w-10 h-10 flex items-center justify-center text-xl font-bold text-white shadow-md focus:outline-none focus:ring-2 focus:ring-red-500">-</button>
+                    <input type="number" id="reps-input" class="flex-grow mx-3 p-2 text-center bg-gray-800 text-orange-300 rounded-md text-xl font-semibold focus:outline-none focus:ring-2 focus:ring-orange-500" min="0">
+                    <button id="reps-increase" class="p-2 bg-green-700 hover:bg-green-800 rounded-full w-10 h-10 flex items-center justify-center text-xl font-bold text-white shadow-md focus:outline-none focus:ring-2 focus:ring-green-500">+</button>
+                </div>
+            </div>
 
-             setDb(firestore);
-             setAuth(firebaseAuth);
+            <div class="flex items-center justify-between mb-4 bg-gray-900 border border-gray-700 p-4 rounded-lg shadow-inner">
+                <label class="text-lg font-medium text-orange-300 w-1/3">Sets:</label>
+                <div class="flex items-center w-2/3">
+                    <button id="sets-decrease" class="p-2 bg-red-700 hover:bg-red-800 rounded-full w-10 h-10 flex items-center justify-center text-xl font-bold text-white shadow-md focus:outline-none focus:ring-2 focus:ring-red-500">-</button>
+                    <input type="number" id="sets-input" class="flex-grow mx-3 p-2 text-center bg-gray-800 text-orange-300 rounded-md text-xl font-semibold focus:outline-none focus:ring-2 focus:ring-orange-500" min="0">
+                    <button id="sets-increase" class="p-2 bg-green-700 hover:bg-green-800 rounded-full w-10 h-10 flex items-center justify-center text-xl font-bold text-white shadow-md focus:outline-none focus:ring-2 focus:ring-green-500">+</button>
+                </div>
+            </div>
 
-             // Listen for auth state changes
-             const unsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
-                 if (user) {
-                     setUserId(user.uid);
-                     setIsAuthReady(true);
-                     console.log("User authenticated:", user.uid);
-                 } else {
-                     // Sign in anonymously if no user is found
-                     try {
-                         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-                         if (initialAuthToken) {
-                             await signInWithCustomToken(firebaseAuth, initialAuthToken);
-                         } else {
-                             await signInAnonymously(firebaseAuth);
-                         }
-                     } catch (authError) {
-                         console.error("Firebase anonymous sign-in failed:", authError);
-                         setError("Authentication failed. Please check your network connection.");
-                     }
-                 }
-                 setLoading(false);
-             });
+            <button id="save-button" class="w-full bg-orange-600 hover:bg-orange-700 text-black font-bold py-3 px-4 rounded-lg shadow-lg transition-colors duration-200 mb-4 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                Save Progress
+            </button>
+            <p id="save-message" class="text-center text-sm mb-4"></p>
 
-             return () => unsubscribe(); // Cleanup auth listener
-         } catch (err) {
-             console.error("Error initializing Firebase:", err);
-             setError("Failed to initialize the application.");
-             setLoading(false);
-         }
-     }, []);
+            <button id="back-button" class="w-full bg-gray-800 hover:bg-gray-700 text-orange-300 font-bold py-3 px-4 rounded-lg shadow-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-gray-500">
+                Back to Exercises
+            </button>
+        </div>
+    </div>
 
-     // Fetch and listen to exercise data from Firestore
-     useEffect(() => {
-         if (!db || !userId || !isAuthReady) {
-             return;
-         }
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-         const exercisesCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/exercises`);
+        // --- Configuration (These will be provided by the environment during execution) ---
+        // const __app_id = 'YOUR_APP_ID'; // Replace with your actual App ID
+        // const __firebase_config = JSON.stringify({
+        //     apiKey: "YOUR_API_KEY",
+        //     authDomain: "YOUR_AUTH_DOMAIN",
+        //     projectId: "YOUR_PROJECT_ID",
+        //     storageBucket: "YOUR_STORAGE_BUCKET",
+        //     messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+        //     appId: "YOUR_APP_ID"
+        // });
+        // const __initial_auth_token = null; // Or your custom auth token if applicable
+        // ----------------------------------------------------------------------------------
 
-         const unsubscribe = onSnapshot(exercisesCollectionRef, (snapshot) => {
-             const data = {};
-             snapshot.forEach((doc) => {
-                 // Corrected: Directly assign doc.data() to the exercise name key
-                 data[doc.id] = doc.data();
-             });
-             setExerciseData(data);
-             console.log("Fetched exercise data:", data);
-         }, (err) => {
-             console.error("Error fetching exercises:", err);
-             setError("Failed to load exercise data.");
-         });
+        // Exercise List (from your request)
+        const EXERCISES = [
+            "Barbell curl", "Dumbell curl", "Hammer curl", "Preacher curl", "Cable curl", "Machine curl",
+            "Bicep pulldown", "Tricep pulldown", "Tricep pushdown", "Overhead rope extention", "Skull crushers",
+            "Forearm cable curls", "Hammer rope curl", "Lat pulldown", "Lat row", "Machine row", "Machine pulldown",
+            "Bench press", "Incline bench press", "Incline smith machine bench press", "Lat pullover", "Pec deck",
+            "Dumbell chest press", "Machine press", "Machine incline press", "Cable fly's", "Dumbell shoulder press",
+            "Machine shoulder press", "Machine laterial raises", "Dumbell laterial raises", "Rear delt face pull",
+            "Reverse pec deck", "Cable laterial raises", "Ab crunch machine", "Ab crunch machine with legs."
+        ];
 
-         // Initial population of exercises if they don't exist
-         const populateInitialExercises = async () => {
-             for (const exerciseName of EXERCISES) {
-                 const docRef = doc(db, `artifacts/${appId}/users/${userId}/exercises`, exerciseName);
-                 const docSnap = await getDoc(docRef);
-                 if (!docSnap.exists()) {
-                     await setDoc(docRef, {
-                         name: exerciseName,
-                         lastWeight: 0,
-                         lastReps: 0,
-                         lastSets: 0
-                     });
-                     console.log(`Initialized ${exerciseName} in Firestore.`);
-                 }
-             }
-         };
+        // --- DOM Element References ---
+        const loadingMessage = document.getElementById('loading-message');
+        const errorMessage = document.getElementById('error-message');
+        const exerciseListView = document.getElementById('exercise-list-view');
+        const exerciseDetailView = document.getElementById('exercise-detail-view');
+        const searchInput = document.getElementById('search-input');
+        const exercisesContainer = document.getElementById('exercises-container');
+        const noExercisesFound = document.getElementById('no-exercises-found');
+        const detailExerciseName = document.getElementById('detail-exercise-name');
+        const weightInput = document.getElementById('weight-input');
+        const repsInput = document.getElementById('reps-input');
+        const setsInput = document.getElementById('sets-input');
+        const saveButton = document.getElementById('save-button');
+        const saveMessage = document.getElementById('save-message');
+        const backButton = document.getElementById('back-button');
 
-         populateInitialExercises();
+        // --- Global Variables for Firebase and App State ---
+        let db;
+        let userId = null;
+        let currentSelectedExercise = null; // Tracks the exercise currently displayed in detail view
+        let allFetchedExerciseData = {}; // Stores all exercise data retrieved from Firestore
 
-         return () => unsubscribe(); // Cleanup snapshot listener
-     }, [db, userId, isAuthReady]);
+        // --- UI Logic Functions ---
 
-     // Filtered exercises based on search query
-     const filteredExercises = EXERCISES.filter(exercise =>
-         exercise.toLowerCase().includes(searchQuery.toLowerCase())
-     );
+        /** Shows either the list view or the detail view, hiding the other. */
+        function showView(viewName) {
+            exerciseListView.classList.add('hidden');
+            exerciseDetailView.classList.add('hidden');
+            if (viewName === 'list') {
+                exerciseListView.classList.remove('hidden');
+            } else if (viewName === 'detail') {
+                exerciseDetailView.classList.remove('hidden');
+            }
+        }
 
-     // Handle navigation to exercise detail
-     const handleExerciseClick = (exerciseName) => {
-         setSelectedExercise(exerciseName);
-     };
+        /** Renders the list of exercises based on the provided array. */
+        function renderExerciseList(filteredExercises) {
+            exercisesContainer.innerHTML = ''; // Clear current list
+            if (filteredExercises.length === 0) {
+                noExercisesFound.classList.remove('hidden');
+            } else {
+                noExercisesFound.classList.add('hidden');
+                filteredExercises.forEach(exercise => {
+                    const button = document.createElement('button');
+                    button.className = 'w-full text-left p-3 bg-gray-900 border border-gray-700 hover:bg-orange-700 hover:border-orange-700 transition-colors duration-200 rounded-lg text-lg font-medium shadow-md text-orange-300';
+                    button.textContent = exercise;
+                    button.onclick = () => showExerciseDetail(exercise); // Attach click handler
+                    const li = document.createElement('li');
+                    li.appendChild(button);
+                    exercisesContainer.appendChild(li);
+                });
+            }
+        }
 
-     // Handle returning to the exercise list
-     const handleBackToList = () => {
-         setSelectedExercise(null);
-     };
+        /** Populates the detail view with data for the selected exercise. */
+        function showExerciseDetail(exerciseName) {
+            currentSelectedExercise = exerciseName;
+            detailExerciseName.textContent = exerciseName;
 
-     // Render loading/error states
-     if (loading) {
-         return (
-             <div className="flex items-center justify-center min-h-screen bg-black text-orange-500">
-                 <div className="text-xl font-semibold">Loading application...</div>
-             </div>
-         );
-     }
+            // Get data from our cached data, or use defaults if not found
+            const data = allFetchedExerciseData[exerciseName] || { lastWeight: 0, lastReps: 0, lastSets: 0 };
+            weightInput.value = data.lastWeight;
+            repsInput.value = data.lastReps;
+            setsInput.value = data.lastSets;
 
-     if (error) {
-         return (
-             <div className="flex items-center justify-center min-h-screen bg-black text-red-400 p-4 text-center">
-                 <div className="text-xl font-semibold">{error}</div>
-             </div>
-         );
-     }
+            showView('detail'); // Switch to the detail view
+        }
 
-     // Main application UI
-     return (
-         <div className="min-h-screen bg-black text-orange-500 font-inter flex flex-col items-center p-4">
-             <div className="bg-gray-900 border border-gray-700 rounded-xl shadow-lg w-full max-w-md p-6">
-                 <h1 className="text-3xl font-bold text-center mb-6 text-orange-500">Gym Tracker</h1>
+        /** Increases or decreases a numerical input's value, preventing negative numbers. */
+        function updateValue(inputElement, increment) {
+            let currentValue = Number(inputElement.value);
+            currentValue = Math.max(0, currentValue + increment);
+            inputElement.value = currentValue;
+        }
 
-                 {/* Conditional rendering based on selectedExercise */}
-                 {selectedExercise ? (
-                     <ExerciseDetail
-                         exerciseName={selectedExercise}
-                         // Corrected: Directly access exerciseData with selectedExercise
-                         data={exerciseData[selectedExercise] || { name: selectedExercise, lastWeight: 0, lastReps: 0, lastSets: 0 }}
-                         db={db}
-                         userId={userId}
-                         onBack={handleBackToList}
-                     />
-                 ) : (
-                     <ExerciseList
-                         searchQuery={searchQuery}
-                         setSearchQuery={setSearchQuery}
-                         filteredExercises={filteredExercises}
-                         onExerciseClick={handleExerciseClick}
-                     />
-                 )}
-             </div>
-         </div>
-     );
- }
+        /** Saves the current exercise's data to Firestore. */
+        async function saveExerciseData() {
+            if (!db || !userId || !currentSelectedExercise) {
+                saveMessage.textContent = "Error: Application not ready or no exercise selected.";
+                saveMessage.className = 'text-center text-sm text-red-400 mb-4';
+                return;
+            }
 
- // ExerciseList Component
- function ExerciseList({ searchQuery, setSearchQuery, filteredExercises, onExerciseClick }) {
-     return (
-         <>
-             <input
-                 type="text"
-                 placeholder="Search exercises..."
-                 className="w-full p-3 mb-4 bg-gray-800 text-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 placeholder-gray-500"
-                 value={searchQuery}
-                 onChange={(e) => setSearchQuery(e.target.value)}
-             />
-             <div className="max-h-96 overflow-y-auto custom-scrollbar">
-                 {filteredExercises.length > 0 ? (
-                     <ul className="space-y-2">
-                         {filteredExercises.map((exercise) => (
-                             <li key={exercise}>
-                                 <button
-                                     onClick={() => onExerciseClick(exercise)}
-                                     className="w-full text-left p-3 bg-gray-900 border border-gray-700 hover:bg-orange-700 hover:border-orange-700 transition-colors duration-200 rounded-lg text-lg font-medium shadow-md text-orange-300"
-                                 >
-                                     {exercise}
-                                 </button>
-                             </li>
-                         ))}
-                     </ul>
-                 ) : (
-                     <p className="text-center text-gray-500 text-lg py-4">No exercises found.</p>
-                 )}
-             </div>
-         </>
-     );
- }
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            const docRef = doc(db, `artifacts/${appId}/users/${userId}/exercises`, currentSelectedExercise);
 
- // ExerciseDetail Component
- function ExerciseDetail({ exerciseName, data, db, userId, onBack }) {
-     // Ensure data is not null/undefined before accessing properties
-     const [weight, setWeight] = useState(data?.lastWeight || 0);
-     const [reps, setReps] = useState(data?.lastReps || 0);
-     const [sets, setSets] = useState(data?.lastSets || 0);
-     const [saveMessage, setSaveMessage] = useState('');
+            try {
+                await setDoc(docRef, {
+                    lastWeight: Number(weightInput.value),
+                    lastReps: Number(repsInput.value),
+                    lastSets: Number(setsInput.value)
+                }, { merge: true }); // Use merge to update specific fields without overwriting others
 
-     // Update local state when data prop changes (e.g., from Firestore snapshot)
-     useEffect(() => {
-         setWeight(data?.lastWeight || 0);
-         setReps(data?.lastReps || 0);
-         setSets(data?.lastSets || 0);
-     }, [data]);
+                saveMessage.textContent = "Saved successfully!";
+                saveMessage.className = 'text-center text-sm text-green-400 mb-4';
+                setTimeout(() => { saveMessage.textContent = ''; }, 3000); // Clear message after 3 seconds
+            } catch (e) {
+                console.error("Error saving document: ", e);
+                saveMessage.textContent = "Error saving data. Please check your connection.";
+                saveMessage.className = 'text-center text-sm text-red-400 mb-4';
+            }
+        }
 
-     // Function to update an individual value
-     const updateValue = (setter, currentValue, increment) => {
-         setter(prev => Math.max(0, prev + increment)); // Ensure value doesn't go below 0
-     };
+        // --- Event Listeners ---
 
-     // Save data to Firestore
-     const handleSave = useCallback(async () => {
-         if (!db || !userId) {
-             setSaveMessage("Error: Database not ready.");
-             return;
-         }
-         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-         const docRef = doc(db, `artifacts/${appId}/users/${userId}/exercises`, exerciseName);
-         try {
-             await setDoc(docRef, {
-                 lastWeight: weight,
-                 lastReps: reps,
-                 lastSets: sets
-             }, { merge: true }); // Use merge to only update specified fields
-             setSaveMessage("Saved successfully!");
-             setTimeout(() => setSaveMessage(''), 3000); // Clear message after 3 seconds
-         } catch (e) {
-             console.error("Error saving document: ", e);
-             setSaveMessage("Error saving data.");
-         }
-     }, [db, userId, exerciseName, weight, reps, sets]);
+        searchInput.addEventListener('input', (e) => {
+            const query = e.target.value.toLowerCase();
+            const filtered = EXERCISES.filter(exercise => exercise.toLowerCase().includes(query));
+            renderExerciseList(filtered);
+        });
 
-     // Input change handlers
-     const handleWeightChange = (e) => setWeight(Number(e.target.value));
-     const handleRepsChange = (e) => setReps(Number(e.target.value));
-     const handleSetsChange = (e) => setSets(Number(e.target.value));
+        // Attach event listeners for increase/decrease buttons
+        document.getElementById('weight-decrease').addEventListener('click', () => updateValue(weightInput, -1));
+        document.getElementById('weight-increase').addEventListener('click', () => updateValue(weightInput, 1));
+        document.getElementById('reps-decrease').addEventListener('click', () => updateValue(repsInput, -1));
+        document.getElementById('reps-increase').addEventListener('click', () => updateValue(repsInput, 1));
+        document.getElementById('sets-decrease').addEventListener('click', () => updateValue(setsInput, -1));
+        document.getElementById('sets-increase').addEventListener('click', () => updateValue(setsInput, 1));
 
-     // Helper component for input fields with buttons
-     const StatInput = ({ label, value, setter }) => (
-         <div className="flex items-center justify-between mb-4 bg-gray-900 border border-gray-700 p-4 rounded-lg shadow-inner">
-             <label className="text-lg font-medium text-orange-300 w-1/3">{label}:</label>
-             <div className="flex items-center w-2/3">
-                 <button
-                     onClick={() => updateValue(setter, value, -1)}
-                     className="p-2 bg-red-700 hover:bg-red-800 rounded-full w-10 h-10 flex items-center justify-center text-xl font-bold text-white shadow-md focus:outline-none focus:ring-2 focus:ring-red-500"
-                 >
-                     -
-                 </button>
-                 <input
-                     type="number"
-                     value={value}
-                     onChange={(e) => setter(Number(e.target.value))}
-                     className="flex-grow mx-3 p-2 text-center bg-gray-800 text-orange-300 rounded-md text-xl font-semibold focus:outline-none focus:ring-2 focus:ring-orange-500"
-                     min="0"
-                 />
-                 <button
-                     onClick={() => updateValue(setter, value, 1)}
-                     className="p-2 bg-green-700 hover:bg-green-800 rounded-full w-10 h-10 flex items-center justify-center text-xl font-bold text-white shadow-md focus:outline-none focus:ring-2 focus:ring-green-500"
-                 >
-                     +
-                 </button>
-             </div>
-         </div>
-     );
+        saveButton.addEventListener('click', saveExerciseData);
 
-     return (
-         <>
-             <h2 className="text-2xl font-bold text-orange-500 mb-6 text-center">{exerciseName}</h2>
+        backButton.addEventListener('click', () => {
+            currentSelectedExercise = null; // Clear selected exercise
+            searchInput.value = ''; // Clear search input
+            renderExerciseList(EXERCISES); // Show full list
+            showView('list'); // Switch back to list view
+        });
 
-             <StatInput label="Weight (kg)" value={weight} setter={setWeight} />
-             <StatInput label="Reps" value={reps} setter={setReps} />
-             <StatInput label="Sets" value={sets} setter={setSets} />
+        // --- Firebase Initialization and Data Loading on Window Load ---
 
-             <button
-                 onClick={handleSave}
-                 className="w-full bg-orange-600 hover:bg-orange-700 text-black font-bold py-3 px-4 rounded-lg shadow-lg transition-colors duration-200 mb-4 focus:outline-none focus:ring-2 focus:ring-orange-500"
-             >
-                 Save Progress
-             </button>
+        window.onload = async function() {
+            loadingMessage.classList.remove('hidden'); // Show loading message
 
-             {saveMessage && (
-                 <p className={`text-center text-sm ${saveMessage.includes('Error') ? 'text-red-400' : 'text-green-400'} mb-4`}>
-                     {saveMessage}
-                 </p>
-             )}
+            try {
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
 
-             <button
-                 onClick={onBack}
-                 className="w-full bg-gray-800 hover:bg-gray-700 text-orange-300 font-bold py-3 px-4 rounded-lg shadow-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-gray-500"
-             >
-                 Back to Exercises
-             </button>
-         </>
-     );
- }
+                if (Object.keys(firebaseConfig).length === 0) {
+                    throw new Error("Firebase configuration is missing. Please ensure '__firebase_config' is set.");
+                }
 
- export default App;
- 
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                const auth = getAuth(app);
+
+                // Authenticate user (anonymously or with custom token)
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        console.log("User authenticated:", userId);
+
+                        // Set up real-time listener for user's exercise data
+                        const exercisesCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/exercises`);
+                        onSnapshot(exercisesCollectionRef, (snapshot) => {
+                            const data = {};
+                            snapshot.forEach((doc) => {
+                                data[doc.id] = doc.data();
+                            });
+                            allFetchedExerciseData = data; // Update our cached data
+
+                            // Re-render relevant view with potentially new data
+                            if (currentSelectedExercise) {
+                                // If in detail view, refresh it with latest data
+                                showExerciseDetail(currentSelectedExercise);
+                            } else {
+                                // If in list view, re-render the filtered list (e.g., if data changed in background)
+                                renderExerciseList(EXERCISES.filter(exercise => exercise.toLowerCase().includes(searchInput.value.toLowerCase())));
+                            }
+                            loadingMessage.classList.add('hidden'); // Hide loading message
+                            showView(currentSelectedExercise ? 'detail' : 'list'); // Show appropriate view
+                        }, (err) => {
+                            console.error("Error fetching exercises:", err);
+                            errorMessage.textContent = "Failed to load exercise data. Please check your internet connection.";
+                            errorMessage.classList.remove('hidden');
+                            loadingMessage.classList.add('hidden');
+                        });
+
+                        // Populate initial exercises in Firestore if they don't exist
+                        for (const exerciseName of EXERCISES) {
+                            const docRef = doc(db, `artifacts/${appId}/users/${userId}/exercises`, exerciseName);
+                            const docSnap = await getDoc(docRef);
+                            if (!docSnap.exists()) {
+                                await setDoc(docRef, {
+                                    name: exerciseName,
+                                    lastWeight: 0,
+                                    lastReps: 0,
+                                    lastSets: 0
+                                });
+                                console.log(`Initialized ${exerciseName} in Firestore: ${exerciseName}`);
+                            }
+                        }
+
+                    } else {
+                        // Attempt anonymous sign-in if no user is found
+                        try {
+                            const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+                            if (initialAuthToken) {
+                                await signInWithCustomToken(auth, initialAuthToken);
+                            } else {
+                                await signInAnonymously(auth);
+                            }
+                        } catch (authError) {
+                            console.error("Firebase anonymous sign-in failed:", authError);
+                            errorMessage.textContent = "Authentication failed. Please check your network connection.";
+                            errorMessage.classList.remove('hidden');
+                            loadingMessage.classList.add('hidden');
+                        }
+                    }
+                });
+
+            } catch (err) {
+                console.error("Error initializing application:", err);
+                errorMessage.textContent = `Failed to initialize the application: ${err.message}`;
+                errorMessage.classList.remove('hidden');
+                loadingMessage.classList.add('hidden');
+            }
+        };
+    </script>
+</body>
+</html>
